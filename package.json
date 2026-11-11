@@ -1,0 +1,39 @@
+{
+  "name": "gerber-films",
+  "version": "0.1.0",
+  "description": "Gerber + drill files in, printable 1:1 photoresist / toner-transfer films out. Runs in the browser.",
+  "license": "MIT",
+  "author": "e-labInnovations",
+  "homepage": "https://gerber-films.elabins.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/e-labInnovations/gerber-films.git"
+  },
+  "keywords": [
+    "pcb",
+    "gerber",
+    "photoresist",
+    "toner-transfer",
+    "kicad",
+    "solder-mask"
+  ],
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:single": "tsc && vite build --mode single && cp dist-single/index.html gerber-films.html",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tracespace/identify-layers": "^5.0.0-alpha.0",
+    "@tracespace/parser": "^5.0.0-alpha.0",
+    "@tracespace/plotter": "^5.0.0-alpha.0",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5",
+    "vite-plugin-singlefile": "^2.3.3"
+  }
+}
