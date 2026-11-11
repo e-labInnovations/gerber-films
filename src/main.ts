@@ -1,6 +1,6 @@
 import './style.css'
 import { loadFiles, type Layer } from './load'
-import { DEFAULT_SETTINGS, layout, pageSize, type Film, type Layout, type Settings } from './layout'
+import { DEFAULT_SETTINGS, layout, pageSize, type Film, type Layout, type PageSize, type Settings } from './layout'
 import { drawLayout } from './render'
 import { SvgPainter } from './svg'
 import { PdfPainter } from './pdf'
@@ -34,6 +34,8 @@ const state = {
   page: 0,
   project: 'board',
   lay: null as Layout | null,
+  source: '',
+  expanded: new Set<string>(),
 }
 
 let filmSeq = 0
@@ -130,27 +132,30 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <h2>1. Files</h2>
         <label class="drop" id="drop">
           <input id="files" type="file" multiple />
-          <strong>Drop a Gerber zip or files here</strong>
-          <span>or click to choose. KiCad, Eagle, Altium and EasyEDA names are recognised.</span>
+          <strong id="drop-title">Drop a Gerber zip or files here</strong>
+          <span id="drop-sub">or click to choose. KiCad, Eagle, Altium and EasyEDA names are recognised.</span>
         </label>
-        <ul id="layers" class="layers"></ul>
+        <details id="layers-box" class="layers-box" hidden>
+          <summary id="layers-sum">Detected layers</summary>
+          <ul id="layers" class="layers"></ul>
+        </details>
       </section>
       <section>
         <h2>2. Films</h2>
         <div class="row resist">
-          <span id="resist-label">Copper films:</span>
+          <span id="resist-label">Copper</span>
           <div class="segmented" role="group" aria-labelledby="resist-label">
-            <button data-resist="neg" aria-pressed="false">Negative (dry film)</button>
-            <button data-resist="pos" aria-pressed="false">Positive</button>
+            <button data-resist="neg" aria-pressed="false" title="Dry-film (negative) resist: copper prints clear">Negative</button>
+            <button data-resist="pos" aria-pressed="false" title="Positive resist or toner transfer: copper prints black">Positive</button>
           </div>
           <span id="resist-mixed" class="mixed" hidden>mixed</span>
         </div>
-        <div id="films"></div>
+        <div id="films" class="films"></div>
         <button id="addFilm" class="ghost" disabled>+ Add film</button>
       </section>
       <section>
         <h2>3. Sheet</h2>
-        <div id="sheet" class="form"></div>
+        <div id="sheet" class="sheet"></div>
       </section>
     </aside>
     <section class="view">
@@ -174,11 +179,13 @@ async function handleFiles(list: FileList | File[]): Promise<void> {
   if (!files.length) return
   $('#summary').textContent = 'Reading files…'
   const zip = files.find((f) => /\.zip$/i.test(f.name))
+  state.source = zip?.name ?? (files.length === 1 ? files[0].name : `${files.length} files`)
   state.project = (zip?.name ?? files[0].name).replace(/\.[^.]+$/, '').replace(/[-_](F|B)[-_.].*$/i, '') || 'board'
   const res = await loadFiles(files)
   state.layers = res.layers
   state.skipped = res.skipped
   state.films = presetFilms(res.layers)
+  state.expanded.clear()
   state.page = 0
   renderLayers()
   renderFilms()
@@ -199,6 +206,18 @@ drop.addEventListener('drop', (e) => {
 })
 
 function renderLayers(): void {
+  const n = state.layers.length
+  const loaded = n > 0
+  $('#drop').classList.toggle('compact', loaded)
+  $('#drop-title').textContent = loaded ? state.source : 'Drop a Gerber zip or files here'
+  $('#drop-sub').textContent = loaded
+    ? `${n} layer${n === 1 ? '' : 's'} · drop or click to replace`
+    : 'or click to choose. KiCad, Eagle, Altium and EasyEDA names are recognised.'
+  const box = $('#layers-box') as HTMLDetailsElement
+  box.hidden = !loaded && !state.skipped.length
+  const issues = state.layers.some((l) => l.warning) || state.skipped.length > 0
+  box.open = issues
+  $('#layers-sum').textContent = `Detected layers (${n})${issues ? ' · check' : ''}`
   $('#layers').replaceChildren(
     ...state.layers.map((l) =>
       h(
@@ -211,7 +230,7 @@ function renderLayers(): void {
     ),
     ...state.skipped.map((f) => h('li', { class: 'skipped' }, h('span', { class: 'tag' }, 'skipped'), h('span', { class: 'fname' }, f))),
   )
-  ;($('#addFilm') as HTMLButtonElement).disabled = !state.layers.length
+  ;($('#addFilm') as HTMLButtonElement).disabled = !loaded
 }
 
 // ---------------------------------------------------------------- films
@@ -228,49 +247,137 @@ function syncResist(): void {
   $('#resist-mixed').hidden = copper.length === 0 || neg || pos
 }
 
+function chip(label: string, checked: boolean, title: string, onchange: (v: boolean) => void): HTMLElement {
+  return h(
+    'label',
+    { class: 'chip', title },
+    h('input', { type: 'checkbox', checked, onchange: (e: Event) => onchange((e.target as HTMLInputElement).checked) }),
+    h('span', {}, label),
+  )
+}
+
 function renderFilms(): void {
   const plotLayers = state.layers.filter((l) => l.type !== 'drill')
+  const changed = (structural = false) => {
+    if (structural) renderFilms()
+    update()
+  }
   $('#films').replaceChildren(
     ...state.films.map((f, i) => {
-      const set = (k: keyof Film, structural = false) => (e: Event) => {
-        const t = e.target as HTMLInputElement
-        const v = t.type === 'checkbox' ? t.checked : t.type === 'number' ? Math.max(0, Math.floor(+t.value || 0)) : t.value
-        ;(f as unknown as Record<string, unknown>)[k] = v
-        if (structural) renderFilms()
-        update()
+      const open = state.expanded.has(f.id)
+      const layer = state.layers.find((l) => l.id === f.layerId)
+      const setCopies = (n: number) => {
+        f.copies = Math.max(0, Math.min(50, n))
+        changed(true)
       }
-      const check = (k: keyof Film, label: string, title: string) =>
-        h('label', { class: 'chk', title }, h('input', { type: 'checkbox', checked: f[k] as boolean, onchange: set(k) }), label)
-      const remove = () => {
-        state.films.splice(i, 1)
-        renderFilms()
-        update()
-      }
-      return h(
+      const head = h(
         'div',
-        { class: `film ${f.enabled ? '' : 'off'}` },
+        { class: 'film-head' },
         h(
-          'div',
-          { class: 'film-head' },
-          h('input', { type: 'checkbox', checked: f.enabled, title: 'Print this film', onchange: set('enabled', true) }),
-          h('input', { class: 'name', value: f.name, 'aria-label': 'Film name', oninput: set('name') }),
-          h('label', { class: 'copies', title: 'Copies' }, '×', h('input', { type: 'number', min: 0, max: 50, value: f.copies, oninput: set('copies') })),
-          h('button', { class: 'icon', title: 'Remove film', 'aria-label': 'Remove film', onclick: remove }, '✕'),
+          'label',
+          { class: 'switch', title: f.enabled ? 'Printing: click to skip' : 'Skipped: click to print' },
+          h('input', {
+            type: 'checkbox',
+            checked: f.enabled,
+            'aria-label': `Print ${f.name}`,
+            onchange: (e: Event) => {
+              f.enabled = (e.target as HTMLInputElement).checked
+              changed(true)
+            },
+          }),
+          h('span', { class: 'knob' }),
         ),
+        h('input', {
+          class: 'name',
+          value: f.name,
+          'aria-label': 'Film name',
+          title: layer ? `${layerName(layer)} · ${layer.filename}` : '',
+          oninput: (e: Event) => {
+            f.name = (e.target as HTMLInputElement).value
+            update()
+          },
+        }),
+        f.enabled
+          ? h(
+              'div',
+              { class: 'stepper', title: 'Copies' },
+              h('button', { 'aria-label': 'Fewer copies', disabled: f.copies <= 1, onclick: () => setCopies(f.copies - 1) }, '−'),
+              h('span', { 'aria-live': 'polite' }, `${f.copies}`),
+              h('button', { 'aria-label': 'More copies', disabled: f.copies >= 50, onclick: () => setCopies(f.copies + 1) }, '+'),
+            )
+          : null,
         h(
-          'div',
-          { class: 'film-opts' },
-          h(
-            'select',
-            { onchange: set('layerId'), 'aria-label': 'Layer' },
-            ...plotLayers.map((l) => h('option', { value: l.id, selected: l.id === f.layerId }, `${layerName(l)} — ${l.filename}`)),
-          ),
-          check('mirror', 'Mirror', 'Mirror: on for top-side films so the toner faces the copper'),
-          check('negative', 'Negative', 'Negative: copper clear, rest black (dry-film resist)'),
-          check('drillDots', 'Drill dots', 'Small centre dots in every hole, to guide the drill'),
-          check('outline', 'Outline', 'Draw the board outline'),
+          'button',
+          {
+            class: `icon more ${open ? 'open' : ''}`,
+            title: 'Layer and more',
+            'aria-label': 'Layer and more',
+            'aria-expanded': String(open),
+            onclick: () => {
+              if (open) state.expanded.delete(f.id)
+              else state.expanded.add(f.id)
+              renderFilms()
+            },
+          },
+          '⋯',
         ),
       )
+      const chips = f.enabled
+        ? h(
+            'div',
+            { class: 'chips' },
+            chip('Mirror', f.mirror, 'Mirror: on for top-side films so the toner faces the copper', (v) => {
+              f.mirror = v
+              changed()
+            }),
+            chip('Negative', f.negative, 'Negative: copper clear, rest black (dry-film resist)', (v) => {
+              f.negative = v
+              changed()
+            }),
+            chip('Drill dots', f.drillDots, 'Small centre dots in every hole, to guide the drill', (v) => {
+              f.drillDots = v
+              changed()
+            }),
+            chip('Outline', f.outline, 'Draw the board outline', (v) => {
+              f.outline = v
+              changed()
+            }),
+          )
+        : null
+      const more = open
+        ? h(
+            'div',
+            { class: 'film-more' },
+            h(
+              'label',
+              { class: 'mini' },
+              'Layer',
+              h(
+                'select',
+                {
+                  onchange: (e: Event) => {
+                    f.layerId = (e.target as HTMLSelectElement).value
+                    changed(true)
+                  },
+                },
+                ...plotLayers.map((l) => h('option', { value: l.id, selected: l.id === f.layerId }, `${layerName(l)} — ${l.filename}`)),
+              ),
+            ),
+            h(
+              'button',
+              {
+                class: 'link danger',
+                onclick: () => {
+                  state.films.splice(i, 1)
+                  state.expanded.delete(f.id)
+                  changed(true)
+                },
+              },
+              'Remove film',
+            ),
+          )
+        : null
+      return h('div', { class: `film ${f.enabled ? '' : 'off'}` }, head, chips, more)
     }),
   )
 }
@@ -296,53 +403,108 @@ document.querySelectorAll<HTMLButtonElement>('[data-resist]').forEach((b) =>
 )
 
 // ---------------------------------------------------------------- sheet settings
-type Field =
-  | { k: keyof Settings; label: string; kind: 'number'; step?: number; min?: number; hint?: string }
-  | { k: keyof Settings; label: string; kind: 'check'; hint?: string }
-  | { k: keyof Settings; label: string; kind: 'select'; options: Array<[string, string]> }
+function segmented<T extends string>(label: string, value: T, options: Array<[T, string, string?]>, onpick: (v: T) => void): HTMLElement {
+  return h(
+    'div',
+    { class: 'segmented', role: 'group', 'aria-label': label },
+    ...options.map(([v, text, title]) =>
+      h('button', { 'aria-pressed': String(v === value), title: title ?? '', onclick: () => onpick(v) }, text),
+    ),
+  )
+}
 
-const FIELDS: Field[] = [
-  { k: 'page', label: 'Page', kind: 'select', options: [['A4', 'A4'], ['A3', 'A3'], ['Letter', 'Letter'], ['Legal', 'Legal'], ['custom', 'Custom']] },
-  { k: 'customW', label: 'Width (mm)', kind: 'number', step: 1, min: 20 },
-  { k: 'customH', label: 'Height (mm)', kind: 'number', step: 1, min: 20 },
-  { k: 'landscape', label: 'Landscape', kind: 'check' },
-  { k: 'rotate', label: 'Rotate boards 90°', kind: 'check' },
-  { k: 'margin', label: 'Page margin (mm)', kind: 'number', step: 0.5, min: 0 },
-  { k: 'columns', label: 'Columns (0 = auto)', kind: 'number', step: 1, min: 0 },
-  { k: 'gapX', label: 'Gap across (mm)', kind: 'number', step: 0.5, min: 0, hint: 'Room for crosses and cutting' },
-  { k: 'gapY', label: 'Gap down (mm)', kind: 'number', step: 0.5, min: 0, hint: 'Room for crosses and labels' },
-  { k: 'tileMargin', label: 'Border round board (mm)', kind: 'number', step: 0.5, min: 0 },
-  { k: 'dotSize', label: 'Drill dot size (mm)', kind: 'number', step: 0.05, min: 0.05 },
-  { k: 'order', label: 'Order', kind: 'select', options: [['pairs', 'Pairs: one of each film per row'], ['grouped', 'Grouped: all copies of a film together']] },
-  { k: 'foldLine', label: 'Fold line', kind: 'check' },
-  { k: 'marks', label: 'Registration crosses', kind: 'check' },
-  { k: 'labels', label: 'Labels', kind: 'check' },
-  { k: 'scaleBar', label: '50 mm check bar', kind: 'check' },
-]
+function numberField(label: string, value: number, step: number, min: number, title: string, onset: (v: number) => void): HTMLElement {
+  return h(
+    'label',
+    { class: 'num', title },
+    h('span', {}, label),
+    h('input', {
+      type: 'number',
+      step,
+      min,
+      value,
+      oninput: (e: Event) => onset(Math.max(min, +(e.target as HTMLInputElement).value || 0)),
+    }),
+  )
+}
+
+function group(title: string, ...kids: Array<HTMLElement | null>): HTMLElement {
+  return h('div', { class: 'group' }, h('h3', {}, title), ...kids)
+}
 
 function renderSheet(): void {
   const s = state.settings
+  const set = <K extends keyof Settings>(k: K, v: Settings[K], rerender = false) => {
+    s[k] = v
+    if (rerender) renderSheet()
+    update()
+  }
+  const pageSel = h(
+    'select',
+    { 'aria-label': 'Page size', onchange: (e: Event) => set('page', (e.target as HTMLSelectElement).value as PageSize, true) },
+    ...([['A4', 'A4'], ['A3', 'A3'], ['Letter', 'Letter'], ['Legal', 'Legal'], ['custom', 'Custom…']] as Array<[PageSize, string]>).map(([v, l]) =>
+      h('option', { value: v, selected: s.page === v }, l),
+    ),
+  )
+  const colsSel = h(
+    'select',
+    { 'aria-label': 'Columns', onchange: (e: Event) => set('columns', +(e.target as HTMLSelectElement).value) },
+    ...[0, 1, 2, 3, 4, 5, 6].map((c) => h('option', { value: c, selected: s.columns === c }, c === 0 ? 'Auto' : `${c}`)),
+  )
   $('#sheet').replaceChildren(
-    ...FIELDS.filter((f) => s.page === 'custom' || (f.k !== 'customW' && f.k !== 'customH')).map((f) => {
-      const id = `s-${f.k}`
-      const onchange = (e: Event) => {
-        const t = e.target as HTMLInputElement
-        const v = f.kind === 'check' ? t.checked : f.kind === 'number' ? Math.max(f.min ?? 0, +t.value || 0) : t.value
-        ;(s as unknown as Record<string, unknown>)[f.k] = v
-        if (f.k === 'page') renderSheet()
-        update()
-      }
-      let input: HTMLElement
-      if (f.kind === 'select') {
-        input = h('select', { id, onchange }, ...f.options.map(([v, l]) => h('option', { value: v, selected: s[f.k] === v }, l)))
-      } else if (f.kind === 'check') {
-        input = h('input', { id, type: 'checkbox', checked: s[f.k] as boolean, onchange })
-      } else {
-        input = h('input', { id, type: 'number', step: f.step ?? 1, min: f.min ?? 0, value: s[f.k] as number, oninput: onchange })
-      }
-      const hint = f.kind !== 'select' && f.hint ? h('small', {}, f.hint) : null
-      return h('div', { class: `field ${f.kind}` }, h('label', { for: id }, f.label), input, hint)
-    }),
+    group(
+      'Page',
+      h(
+        'div',
+        { class: 'line' },
+        pageSel,
+        segmented('Orientation', s.landscape ? 'l' : 'p', [['p', 'Portrait'], ['l', 'Landscape']], (v) => set('landscape', v === 'l', true)),
+      ),
+      s.page === 'custom'
+        ? h(
+            'div',
+            { class: 'pair' },
+            numberField('Width', s.customW, 1, 20, 'Page width in mm', (v) => set('customW', v)),
+            numberField('Height', s.customH, 1, 20, 'Page height in mm', (v) => set('customH', v)),
+          )
+        : null,
+    ),
+    group(
+      'Layout',
+      h('div', { class: 'line' }, h('label', { class: 'inline' }, 'Columns', colsSel), chip('Rotate 90°', s.rotate, 'Turn boards sideways to fit more copies', (v) => set('rotate', v))),
+      segmented(
+        'Order',
+        s.order,
+        [
+          ['pairs', 'Pairs', 'One copy of each film per row: top and bottom side by side'],
+          ['grouped', 'Grouped', 'All copies of a film together'],
+        ],
+        (v) => set('order', v, true),
+      ),
+    ),
+    group(
+      'Spacing (mm)',
+      h(
+        'div',
+        { class: 'quad' },
+        numberField('Margin', s.margin, 0.5, 0, 'Blank border around the page', (v) => set('margin', v)),
+        numberField('Border', s.tileMargin, 0.5, 0, 'Extra space around each board (black in negatives)', (v) => set('tileMargin', v)),
+        numberField('Gap across', s.gapX, 0.5, 0, 'Between columns: room for crosses and cutting', (v) => set('gapX', v)),
+        numberField('Gap down', s.gapY, 0.5, 0, 'Between rows: room for crosses and labels', (v) => set('gapY', v)),
+      ),
+    ),
+    group(
+      'Marks',
+      h(
+        'div',
+        { class: 'chips' },
+        chip('Fold line', s.foldLine, 'Dashed line between two columns of fold pairs', (v) => set('foldLine', v)),
+        chip('Crosses', s.marks, 'Registration crosses at every corner', (v) => set('marks', v)),
+        chip('Labels', s.labels, 'Film name under each copy', (v) => set('labels', v)),
+        chip('50 mm bar', s.scaleBar, 'Measure it after printing to check the scale', (v) => set('scaleBar', v)),
+      ),
+      numberField('Drill dot (mm)', s.dotSize, 0.05, 0.05, 'Diameter of the drill-centre dots', (v) => set('dotSize', v)),
+    ),
   )
 }
 
