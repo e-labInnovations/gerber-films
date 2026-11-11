@@ -138,9 +138,12 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
       <section>
         <h2>2. Films</h2>
         <div class="row resist">
-          <span>Copper films:</span>
-          <button data-resist="neg">Negative (dry film)</button>
-          <button data-resist="pos">Positive</button>
+          <span id="resist-label">Copper films:</span>
+          <div class="segmented" role="group" aria-labelledby="resist-label">
+            <button data-resist="neg" aria-pressed="false">Negative (dry film)</button>
+            <button data-resist="pos" aria-pressed="false">Positive</button>
+          </div>
+          <span id="resist-mixed" class="mixed" hidden>mixed</span>
         </div>
         <div id="films"></div>
         <button id="addFilm" class="ghost" disabled>+ Add film</button>
@@ -212,6 +215,19 @@ function renderLayers(): void {
 }
 
 // ---------------------------------------------------------------- films
+/** Reflect the copper films' negative setting on the segmented control. */
+function syncResist(): void {
+  const copper = state.films.filter((f) => state.layers.find((l) => l.id === f.layerId)?.type === 'copper')
+  const neg = copper.length > 0 && copper.every((f) => f.negative)
+  const pos = copper.length > 0 && copper.every((f) => !f.negative)
+  document.querySelectorAll<HTMLButtonElement>('[data-resist]').forEach((b) => {
+    const on = b.dataset.resist === 'neg' ? neg : pos
+    b.setAttribute('aria-pressed', String(on))
+    b.disabled = copper.length === 0
+  })
+  $('#resist-mixed').hidden = copper.length === 0 || neg || pos
+}
+
 function renderFilms(): void {
   const plotLayers = state.layers.filter((l) => l.type !== 'drill')
   $('#films').replaceChildren(
@@ -333,6 +349,7 @@ function renderSheet(): void {
 // ---------------------------------------------------------------- preview + export
 function update(): void {
   saveSettings()
+  syncResist()
   const s = state.settings
   const lay = layout(state.films, state.layers, s)
   state.lay = lay
