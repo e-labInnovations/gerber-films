@@ -1,6 +1,6 @@
 // Read Gerber / Excellon files (loose or zipped), identify layers, plot them.
 import JSZip from 'jszip'
-import { parse } from '@tracespace/parser'
+import { parse, type GerberTree } from '@tracespace/parser'
 import { plot } from '@tracespace/plotter'
 import { identifyLayers } from '@tracespace/identify-layers'
 import { imageBounds, toDrawables, toDrillMarks, type Bounds, type Drawable, type DrillMarks } from './geometry'
@@ -42,6 +42,28 @@ export interface LoadResult {
   skipped: string[]
 }
 
+/**
+ * Which plotted graphics were drawn with clear polarity (%LPC*%). The plotter emits graphics in file
+ * order but drops the polarity, so plot the file up to each polarity change and use the graphic
+ * counts as boundaries. Returns undefined when the file never switches to clear.
+ */
+function clearFlags(tree: GerberTree, total: number): boolean[] | undefined {
+  const kids = tree.children
+  const changes = kids.flatMap((n, k) => (n.type === 'loadPolarity' ? [{ k, clear: n.polarity === 'clear' }] : []))
+  if (!changes.some((c) => c.clear)) return undefined
+  const flags = new Array<boolean>(total).fill(false)
+  let from = 0
+  let clear = false
+  for (const c of changes) {
+    const upto = c.k === 0 ? 0 : plot({ ...tree, children: kids.slice(0, c.k) }).children.length
+    flags.fill(clear, from, upto)
+    from = upto
+    clear = c.clear
+  }
+  flags.fill(clear, from)
+  return flags
+}
+
 export async function loadFiles(files: File[]): Promise<LoadResult> {
   const sources = await expand(files)
   const ids = identifyLayers(sources.map((s) => s.name))
@@ -60,11 +82,9 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
         type,
         side: (idt.side ?? (isDrill ? 'all' : 'none')) as LayerSide,
         bounds: imageBounds(img),
-        drawables: isDrill ? [] : toDrawables(img),
+        drawables: isDrill ? [] : toDrawables(img, isDrill ? undefined : clearFlags(tree, img.children.length)),
         drill: isDrill ? toDrillMarks(img) : null,
       }
-      // the plotter ignores clear polarity (%LPC*%); say so instead of drawing it wrong
-      if (/%LPC\*%/.test(src.text)) layer.warning = 'uses clear polarity (LPC), which is not supported: check the preview'
       layers.push(layer)
     } catch {
       skipped.push(src.name)

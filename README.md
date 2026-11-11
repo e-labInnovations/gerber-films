@@ -22,13 +22,15 @@
 ## Features
 
 - **Drop in a Gerber zip** (or loose files) from KiCad, Eagle, Altium, EasyEDA and others.
-  Layers are recognised from their file names.
+  Layers are recognised from their file names. Clear polarity (`%LPC*%`, used by EasyEDA for
+  copper-pour clearances) is handled.
 - **Any number of films per sheet**: pick the layer, number of copies, mirror, negative,
   drill-centre dots and board outline for each one.
 - **Sheet layout**: A4, A3, Letter, Legal or custom page, landscape, margins, gaps,
   columns (auto or fixed), 90° rotation, border around the board.
-- **Fold pairs** for double-sided boards: top and bottom copies side by side with a fold line.
-  Fold the strip toner-inside and the two layers land exactly on top of each other.
+- **Fold pairs** for double-sided boards: top and bottom copies side by side with a fold line,
+  as many pairs per row as fit. Fold a pair toner-inside and the two layers land exactly on top
+  of each other.
 - **Registration crosses, labels and a 50 mm check bar** on every sheet.
 - **Exact 1:1 PDF**: written directly as vector paths with the page size in points, so
   "Actual size" printing is true to scale. SVG export of any page too.
@@ -79,12 +81,15 @@ Every push to `main` builds the site and the single-file version and publishes t
 GitHub Pages (`.github/workflows/deploy.yml`) at
 [gerber-films.elabins.com](https://gerber-films.elabins.com).
 
-## Known limitations
+## Notes on the Gerber plotter
 
-- Clear polarity (`%LPC*%`) is not supported by the Gerber plotter used here. Files that use it
-  get a warning in the layer list. KiCad does not produce it.
-- `@tracespace/plotter` 5.0.0-alpha.0 builds macro vector lines with the width along the line
-  instead of across it. `src/geometry.ts` repairs these; KiCad's rounded-rectangle pads rely on them.
+[`@tracespace/plotter`](https://github.com/tracespace/tracespace) 5.0.0-alpha.0 has two gaps that
+this tool works around:
+
+- It drops layer polarity. `src/load.ts` re-plots the file up to each `%LP…%` change to find which
+  graphics are clear, and `src/render.ts` paints those in the film's background colour.
+- It builds macro vector lines with the width along the line instead of across it.
+  `src/geometry.ts` repairs these; KiCad's rounded-rectangle pads rely on them.
 
 ## License
 

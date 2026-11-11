@@ -17,12 +17,15 @@ export interface Sub {
 export interface Fill {
   kind: 'fill'
   subs: Sub[]
+  /** clear polarity: erases what was drawn before it */
+  clear?: boolean
 }
 /** Round caps and joins, like a circular Gerber aperture. */
 export interface Stroke {
   kind: 'stroke'
   subs: Sub[]
   width: number
+  clear?: boolean
 }
 export type Drawable = Fill | Stroke
 export interface Bounds {
@@ -228,23 +231,27 @@ function pageMapper(units: string): (p: Pt) => Pt {
   return ([x, y]) => [x * k, -y * k]
 }
 
-/** Copper, mask, silkscreen or outline layer as drawables (mm, y down). */
-export function toDrawables(img: ImageTree): Drawable[] {
+/**
+ * Copper, mask, silkscreen or outline layer as drawables (mm, y down), in drawing order.
+ * `clear[i]` marks graphics drawn with clear polarity.
+ */
+export function toDrawables(img: ImageTree, clear?: boolean[]): Drawable[] {
   const f = pageMapper(img.units)
   const k = toMm(img.units)
   const out: Drawable[] = []
-  for (const node of img.children) {
+  img.children.forEach((node, i) => {
+    const c = clear?.[i] ? { clear: true } : {}
     if (node.type === 'imageShape') {
       const fill = shapeFill(node.shape)
-      out.push({ kind: 'fill', subs: fill.subs.map((s) => mapSub(s, f)) })
+      out.push({ kind: 'fill', subs: fill.subs.map((s) => mapSub(s, f)), ...c })
     } else if (node.type === 'imageRegion') {
       const subs = segmentsToSubs(node.segments, true).map((s) => mapSub(oriented(s, true), f))
-      out.push({ kind: 'fill', subs })
+      out.push({ kind: 'fill', subs, ...c })
     } else if (node.type === 'imagePath') {
       const subs = segmentsToSubs(node.segments, false).map((s) => mapSub(s, f))
-      out.push({ kind: 'stroke', subs, width: Math.max(node.width * k, 0.05) })
+      out.push({ kind: 'stroke', subs, width: Math.max(node.width * k, 0.05), ...c })
     }
-  }
+  })
   return out
 }
 

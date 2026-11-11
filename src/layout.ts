@@ -40,9 +40,9 @@ export const DEFAULT_SETTINGS: Settings = {
   customW: 210,
   customH: 297,
   landscape: false,
-  margin: 8,
-  gapX: 15,
-  gapY: 20,
+  margin: 6,
+  gapX: 12,
+  gapY: 12,
   columns: 0,
   order: 'pairs',
   rotate: false,
@@ -61,6 +61,13 @@ const PAGES: Record<Exclude<PageSize, 'custom'>, [number, number]> = {
   Legal: [215.9, 355.6],
 }
 
+/** Space the extras need outside the grid of boards (mm). Kept in sync with render.ts. */
+export const MARK_OFF = 3
+export const MARK_LEN = 4
+const MARK_REACH = MARK_OFF + MARK_LEN / 2
+const LABEL_REACH = MARK_OFF + 3
+const SCALE_BAR = 6
+
 /** Affine map [a, b, c, d, e, f]: x' = a x + c y + e, y' = b x + d y + f. */
 export type Mat = [number, number, number, number, number, number]
 
@@ -77,7 +84,8 @@ export interface Page {
   w: number
   h: number
   tiles: Tile[]
-  fold: number | null
+  /** x positions of fold lines, each between the two tiles of a pair */
+  folds: number[]
 }
 
 export interface Layout {
@@ -123,13 +131,17 @@ export function layout(films: Film[], layers: Layer[], s: Settings): Layout {
   const bw = board.x1 - board.x0 + 2 * s.tileMargin
   const bh = board.y1 - board.y0 + 2 * s.tileMargin
   const [tw, th] = s.rotate ? [bh, bw] : [bw, bh]
-  const availW = W - 2 * s.margin
-  const availH = H - 2 * s.margin
+  // keep crosses, labels and the check bar on the page and off each other
+  const edgeX = s.marks ? MARK_REACH : 0
+  const top = s.marks ? MARK_REACH : 0
+  const bottom = Math.max(s.marks ? MARK_REACH : 0, s.labels ? LABEL_REACH : 0) + (s.scaleBar ? SCALE_BAR : 0)
+  const availW = W - 2 * s.margin - 2 * edgeX
+  const availH = H - 2 * s.margin - top - bottom
   const fitCols = Math.floor((availW + s.gapX) / (tw + s.gapX))
   const rows = Math.floor((availH + s.gapY) / (th + s.gapY))
   const foldPairs = s.foldLine && s.order === 'pairs' && active.length === 2
-  // auto columns: fold pairs want exactly two, otherwise as many as fit
-  let cols = s.columns > 0 ? s.columns : foldPairs ? Math.min(2, fitCols) : fitCols
+  // auto columns: as many as fit; for fold pairs, as many whole pairs as fit
+  let cols = s.columns > 0 ? s.columns : foldPairs && fitCols >= 2 ? fitCols - (fitCols % 2) : fitCols
   if (fitCols < 1 || rows < 1) {
     warnings.push('The board does not fit on this page with these margins. Try a bigger page, landscape or rotation.')
     return { pages: [], board, tileW: tw, tileH: th, cols: 0, rows: 0, warnings }
@@ -157,7 +169,7 @@ export function layout(films: Film[], layers: Layer[], s: Settings): Layout {
     const totalW = cols * tw + (cols - 1) * s.gapX
     const totalH = usedRows * th + (usedRows - 1) * s.gapY
     const ox = (W - totalW) / 2
-    const oy = (H - totalH) / 2
+    const oy = s.margin + top + (availH - totalH) / 2
     const tiles: Tile[] = chunk.map((film, i) => {
       const x = ox + (i % cols) * (tw + s.gapX)
       const y = oy + Math.floor(i / cols) * (th + s.gapY)
@@ -168,11 +180,18 @@ export function layout(films: Film[], layers: Layer[], s: Settings): Layout {
       m = mul([1, 0, 0, 1, x + tw / 2, y + th / 2], m)
       return { film, x, y, w: tw, h: th, m }
     })
-    pages.push({ w: W, h: H, tiles, fold: s.foldLine && cols === 2 ? W / 2 : null })
+    // a fold line in the middle of every pair of columns
+    const folds: number[] = []
+    if (s.foldLine && cols >= 2 && cols % 2 === 0) {
+      for (let c = 0; c < cols; c += 2) folds.push(ox + c * (tw + s.gapX) + tw + s.gapX / 2)
+    }
+    pages.push({ w: W, h: H, tiles, folds })
   }
-  if (s.foldLine && cols === 2) {
+  if (s.foldLine && cols >= 2) {
     if (s.order !== 'pairs' || active.length !== 2) {
       warnings.push('Fold pairs need exactly two films (e.g. top and bottom copper) in "Pairs" order; otherwise rows mix layers.')
+    } else if (cols % 2) {
+      warnings.push('Use an even number of columns for fold pairs.')
     } else if (active[0].copies !== active[1].copies) {
       warnings.push('For fold pairs, give both films the same number of copies.')
     }

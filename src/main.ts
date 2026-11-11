@@ -6,7 +6,7 @@ import { SvgPainter } from './svg'
 import { PdfPainter } from './pdf'
 
 // ---------------------------------------------------------------- state
-const STORE = 'gerber-films:settings'
+const STORE = 'gerber-films:settings:v2' // v2: tighter default spacing
 
 function loadSettings(): Settings {
   try {

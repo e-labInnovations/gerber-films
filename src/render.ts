@@ -1,7 +1,7 @@
 // Draw laid-out pages onto a Painter (SVG preview / PDF). All coordinates are page millimetres.
 import type { Pt, Sub } from './geometry'
 import type { Layer } from './load'
-import type { Layout, Mat, Page, Settings } from './layout'
+import { MARK_LEN, MARK_OFF, type Layout, type Mat, type Page, type Settings } from './layout'
 
 export type Color = 'black' | 'white'
 
@@ -17,8 +17,6 @@ export interface Painter {
   text(x: number, y: number, size: number, str: string, anchor: 'start' | 'middle'): void
 }
 
-const MARK_OFF = 3
-const MARK_LEN = 4
 
 function apply(m: Mat, [x, y]: Pt): Pt {
   return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]
@@ -54,8 +52,9 @@ function drawPage(p: Painter, page: Page, layers: Map<string, Layer>, s: Setting
     if (t.film.negative) p.rect(t.x, t.y, t.w, t.h, 'black')
     for (const d of layer.drawables) {
       const subs = mapSubs(d.subs, t.m)
-      if (d.kind === 'fill') p.fill(subs, fg)
-      else p.stroke(subs, d.width, fg)
+      const c = d.clear ? bg : fg // clear polarity erases back to the film's background
+      if (d.kind === 'fill') p.fill(subs, c)
+      else p.stroke(subs, d.width, c)
     }
     if (t.film.outline && outline && outline !== layer) {
       for (const d of outline.drawables) {
@@ -85,17 +84,17 @@ function drawPage(p: Painter, page: Page, layers: Map<string, Layer>, s: Setting
       p.text(t.x + t.w / 2, t.y + t.h + MARK_OFF + 1, 2.2, filmLabel(t.film.name, t.film.mirror, t.film.negative), 'middle')
     }
   }
-  if (page.fold !== null && page.tiles.length) {
-    const top = Math.min(...page.tiles.map((t) => t.y)) - 12
-    const bottom = Math.max(...page.tiles.map((t) => t.y + t.h)) + 10
-    p.stroke([line(page.fold, top, page.fold, bottom)], 0.15, 'black', [2, 2])
-    p.text(page.fold, top - 2, 2.2, 'fold here, toner inside', 'middle')
+  if (page.folds.length && page.tiles.length) {
+    const top = Math.min(...page.tiles.map((t) => t.y)) - MARK_OFF
+    const bottom = Math.max(...page.tiles.map((t) => t.y + t.h)) + MARK_OFF
+    for (const x of page.folds) p.stroke([line(x, top, x, bottom)], 0.15, 'black', [2, 2])
   }
   if (s.scaleBar) {
     const bx = s.margin + 2
     const by = page.h - s.margin
     p.stroke([line(bx, by, bx + 50, by), line(bx, by - 1.5, bx, by + 1.5), line(bx + 50, by - 1.5, bx + 50, by + 1.5)], 0.25, 'black')
-    p.text(bx + 53, by + 0.9, 2.5, '50 mm  |  print at 100%, no scaling  |  toner side against the copper', 'start')
+    const fold = page.folds.length ? '  |  fold on the dashed lines, toner inside' : ''
+    p.text(bx + 53, by + 0.9, 2.5, `50 mm  |  print at 100%, no scaling  |  toner side against the copper${fold}`, 'start')
   }
   p.endPage()
 }
