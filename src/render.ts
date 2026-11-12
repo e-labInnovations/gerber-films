@@ -73,8 +73,8 @@ function drawPage(p: Painter, page: Page, layers: Map<string, Layer>, s: Setting
     }
     p.unclip()
     if (s.marks) {
-      const xs = [t.x - MARK_OFF, t.x + t.w + MARK_OFF]
-      const ys = [t.y - MARK_OFF, t.y + t.h + MARK_OFF]
+      const xs = [t.x - page.markX, t.x + t.w + page.markX]
+      const ys = [t.y - page.markY, t.y + t.h + page.markY]
       const subs: Sub[] = []
       for (const x of xs) for (const y of ys) {
         subs.push(line(x - MARK_LEN / 2, y, x + MARK_LEN / 2, y), line(x, y - MARK_LEN / 2, x, y + MARK_LEN / 2))
@@ -86,8 +86,8 @@ function drawPage(p: Painter, page: Page, layers: Map<string, Layer>, s: Setting
     }
   }
   if (page.folds.length && page.tiles.length) {
-    const top = Math.min(...page.tiles.map((t) => t.y)) - MARK_OFF
-    const bottom = Math.max(...page.tiles.map((t) => t.y + t.h)) + MARK_OFF
+    const top = Math.min(...page.tiles.map((t) => t.y)) - page.markY
+    const bottom = Math.max(...page.tiles.map((t) => t.y + t.h)) + page.markY
     for (const x of page.folds) p.stroke([line(x, top, x, bottom)], 0.15, 'black', [2, 2])
   }
   if (s.scaleBar) drawScaleBar(p, page, s)

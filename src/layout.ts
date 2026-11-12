@@ -77,8 +77,16 @@ const PAGES: Record<Exclude<PageSize, 'custom'>, [number, number]> = {
 /** Space the extras need outside the grid of boards (mm). Kept in sync with render.ts. */
 export const MARK_OFF = 3
 export const MARK_LEN = 4
-const MARK_REACH = MARK_OFF + MARK_LEN / 2
 const LABEL_REACH = MARK_OFF + 3
+
+/**
+ * Distance of the registration crosses from a tile edge. Normally MARK_OFF, but never more than half
+ * the gap: with a narrow gap neighbouring tiles then share one cross in the middle of the gap instead
+ * of their crosses passing each other (which makes a board look off-centre).
+ */
+export function markOffset(gap: number): number {
+  return Math.min(MARK_OFF, Math.max(0.5, gap / 2))
+}
 export const SCALE_BAR = 6
 
 /** Affine map [a, b, c, d, e, f]: x' = a x + c y + e, y' = b x + d y + f. */
@@ -99,6 +107,9 @@ export interface Page {
   tiles: Tile[]
   /** x positions of fold lines, each between the two tiles of a pair */
   folds: number[]
+  /** registration cross offsets from the tile edges, across and down */
+  markX: number
+  markY: number
 }
 
 export interface Layout {
@@ -145,12 +156,14 @@ export function layout(films: Film[], layers: Layer[], s: Settings): Layout {
   const bh = board.y1 - board.y0 + 2 * s.tileMargin
   const [tw, th] = s.rotate ? [bh, bw] : [bw, bh]
   // keep crosses, labels and the check bar on the page and off each other
-  const edgeX = s.marks ? MARK_REACH : 0
+  const markX = markOffset(s.gapX)
+  const markY = markOffset(s.gapY)
+  const edgeX = s.marks ? markX + MARK_LEN / 2 : 0
   const bar = (edge: string) => (s.scaleBar && s.scaleBarPos.startsWith(edge) ? SCALE_BAR : 0)
   const left = edgeX + bar('left')
   const right = edgeX + bar('right')
-  const top = (s.marks ? MARK_REACH : 0) + bar('top')
-  const bottom = Math.max(s.marks ? MARK_REACH : 0, s.labels ? LABEL_REACH : 0) + bar('bottom')
+  const top = (s.marks ? markY + MARK_LEN / 2 : 0) + bar('top')
+  const bottom = Math.max(s.marks ? markY + MARK_LEN / 2 : 0, s.labels ? LABEL_REACH : 0) + bar('bottom')
   const availW = W - 2 * s.margin - left - right
   const availH = H - 2 * s.margin - top - bottom
   const fitCols = Math.floor((availW + s.gapX) / (tw + s.gapX))
@@ -201,7 +214,7 @@ export function layout(films: Film[], layers: Layer[], s: Settings): Layout {
     if (s.foldLine && cols >= 2 && cols % 2 === 0) {
       for (let c = 0; c < cols; c += 2) folds.push(ox + c * (tw + s.gapX) + tw + s.gapX / 2)
     }
-    pages.push({ w: W, h: H, tiles, folds })
+    pages.push({ w: W, h: H, tiles, folds, markX, markY })
   }
   if (s.foldLine && cols >= 2) {
     if (s.order !== 'pairs' || active.length !== 2) {
