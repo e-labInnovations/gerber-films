@@ -31,7 +31,8 @@
 - **Fold pairs** for double-sided boards: top and bottom copies side by side with a fold line,
   as many pairs per row as fit. Fold a pair toner-inside and the two layers land exactly on top
   of each other.
-- **Registration crosses, labels and a 50 mm check bar** on every sheet.
+- **Registration crosses, labels and a 50 mm check bar** on every sheet. The bar can sit on any
+  edge; on the left or right it runs vertically and only takes a thin strip of the page width.
 - **Exact 1:1 PDF**: written directly as vector paths with the page size in points, so
   "Actual size" printing is true to scale. SVG export of any page too.
 - **Private**: everything runs in the browser. Files are never uploaded.

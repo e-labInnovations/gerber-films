@@ -60,9 +60,10 @@ export class SvgPainter implements Painter {
   dot(x: number, y: number, r: number, color: Color): void {
     this.parts.push(`<circle cx="${f(x)}" cy="${f(y)}" r="${f(r)}" fill="${hex(color)}"/>`)
   }
-  text(x: number, y: number, size: number, str: string, anchor: 'start' | 'middle'): void {
+  text(x: number, y: number, size: number, str: string, anchor: 'start' | 'middle' | 'end', vertical = false): void {
+    const rot = vertical ? ` transform="rotate(-90 ${f(x)} ${f(y)})"` : ''
     this.parts.push(
-      `<text x="${f(x)}" y="${f(y)}" font-family="Helvetica, Arial, sans-serif" font-size="${f(size)}" text-anchor="${anchor}">${esc(str)}</text>`,
+      `<text x="${f(x)}" y="${f(y)}"${rot} font-family="Helvetica, Arial, sans-serif" font-size="${f(size)}" text-anchor="${anchor}">${esc(str)}</text>`,
     )
   }
 }

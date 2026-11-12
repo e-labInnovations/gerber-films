@@ -14,7 +14,8 @@ export interface Painter {
   fill(subs: Sub[], color: Color): void
   stroke(subs: Sub[], width: number, color: Color, dash?: number[]): void
   dot(x: number, y: number, r: number, color: Color): void
-  text(x: number, y: number, size: number, str: string, anchor: 'start' | 'middle'): void
+  /** `vertical`: rotated to read upwards, (x, y) is then the anchor on the text's baseline */
+  text(x: number, y: number, size: number, str: string, anchor: 'start' | 'middle' | 'end', vertical?: boolean): void
 }
 
 
@@ -89,14 +90,33 @@ function drawPage(p: Painter, page: Page, layers: Map<string, Layer>, s: Setting
     const bottom = Math.max(...page.tiles.map((t) => t.y + t.h)) + MARK_OFF
     for (const x of page.folds) p.stroke([line(x, top, x, bottom)], 0.15, 'black', [2, 2])
   }
-  if (s.scaleBar) {
-    const bx = s.margin + 2
-    const by = page.h - s.margin
-    p.stroke([line(bx, by, bx + 50, by), line(bx, by - 1.5, bx, by + 1.5), line(bx + 50, by - 1.5, bx + 50, by + 1.5)], 0.25, 'black')
-    const fold = page.folds.length ? '  |  fold on the dashed lines, toner inside' : ''
-    p.text(bx + 53, by + 0.9, 2.5, `50 mm  |  print at 100%, no scaling  |  toner side against the copper${fold}`, 'start')
-  }
+  if (s.scaleBar) drawScaleBar(p, page, s)
   p.endPage()
+}
+
+/** 50 mm check bar with its note, on the edge and end chosen in the settings. */
+function drawScaleBar(p: Painter, page: Page, s: Settings): void {
+  const fold = page.folds.length ? '  |  fold on the dashed lines, toner inside' : ''
+  const note = `50 mm  |  print at 100%, no scaling  |  toner side against the copper${fold}`
+  const [edge, end] = s.scaleBarPos.split('-')
+  const m = s.margin + 2
+  const tick = 1.5
+  if (edge === 'top' || edge === 'bottom') {
+    const y = edge === 'top' ? s.margin + 2.5 : page.h - s.margin
+    const x0 = end === 'left' ? m : page.w - m - 50
+    const x1 = x0 + 50
+    p.stroke([line(x0, y, x1, y), line(x0, y - tick, x0, y + tick), line(x1, y - tick, x1, y + tick)], 0.25, 'black')
+    if (end === 'left') p.text(x1 + 3, y + 0.9, 2.5, note, 'start')
+    else p.text(x0 - 3, y + 0.9, 2.5, note, 'end')
+  } else {
+    const x = edge === 'left' ? m : page.w - m
+    const y1 = end === 'bottom' ? page.h - m : m + 50 // lower end of the bar
+    const y0 = y1 - 50
+    p.stroke([line(x, y0, x, y1), line(x - tick, y0, x + tick, y0), line(x - tick, y1, x + tick, y1)], 0.25, 'black')
+    // text reads upwards along the bar: above it when the bar sits low, below it when the bar sits high
+    if (end === 'bottom') p.text(x + 0.9, y0 - 3, 2.5, note, 'start', true)
+    else p.text(x + 0.9, y1 + 3, 2.5, note, 'end', true)
+  }
 }
 
 export function drawLayout(p: Painter, lay: Layout, layers: Layer[], s: Settings, only?: number): void {

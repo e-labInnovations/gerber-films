@@ -1,6 +1,6 @@
 import './style.css'
 import { loadFiles, type Layer } from './load'
-import { DEFAULT_SETTINGS, layout, pageSize, type Film, type Layout, type PageSize, type Settings } from './layout'
+import { DEFAULT_SETTINGS, layout, pageSize, type Film, type Layout, type PageSize, type ScaleBarPos, type Settings } from './layout'
 import { drawLayout } from './render'
 import { SvgPainter } from './svg'
 import { PdfPainter } from './pdf'
@@ -432,6 +432,17 @@ function group(title: string, ...kids: Array<HTMLElement | null>): HTMLElement {
   return h('div', { class: 'group' }, h('h3', {}, title), ...kids)
 }
 
+const SCALE_BAR_POSITIONS: Array<[ScaleBarPos, string]> = [
+  ['bottom-left', 'Bottom, left'],
+  ['bottom-right', 'Bottom, right'],
+  ['top-left', 'Top, left'],
+  ['top-right', 'Top, right'],
+  ['left-bottom', 'Left side, bottom (vertical)'],
+  ['left-top', 'Left side, top (vertical)'],
+  ['right-bottom', 'Right side, bottom (vertical)'],
+  ['right-top', 'Right side, top (vertical)'],
+]
+
 function renderSheet(): void {
   const s = state.settings
   const set = <K extends keyof Settings>(k: K, v: Settings[K], rerender = false) => {
@@ -501,8 +512,20 @@ function renderSheet(): void {
         chip('Fold line', s.foldLine, 'Dashed line between two columns of fold pairs', (v) => set('foldLine', v)),
         chip('Crosses', s.marks, 'Registration crosses at every corner', (v) => set('marks', v)),
         chip('Labels', s.labels, 'Film name under each copy', (v) => set('labels', v)),
-        chip('50 mm bar', s.scaleBar, 'Measure it after printing to check the scale', (v) => set('scaleBar', v)),
+        chip('50 mm bar', s.scaleBar, 'Measure it after printing to check the scale', (v) => set('scaleBar', v, true)),
       ),
+      s.scaleBar
+        ? h(
+            'label',
+            { class: 'inline', title: 'Left and right run vertically and only use a thin strip of the page width' },
+            'Bar position',
+            h(
+              'select',
+              { onchange: (e: Event) => set('scaleBarPos', (e.target as HTMLSelectElement).value as ScaleBarPos) },
+              ...SCALE_BAR_POSITIONS.map(([v, l]) => h('option', { value: v, selected: s.scaleBarPos === v }, l)),
+            ),
+          )
+        : null,
       numberField('Drill dot (mm)', s.dotSize, 0.05, 0.05, 'Diameter of the drill-centre dots', (v) => set('dotSize', v)),
     ),
   )

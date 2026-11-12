@@ -16,6 +16,17 @@ export interface Film {
 
 export type PageSize = 'A4' | 'A3' | 'Letter' | 'Legal' | 'custom'
 
+/** Edge of the page, then which end of that edge. Left/right bars run vertically. */
+export type ScaleBarPos =
+  | 'bottom-left'
+  | 'bottom-right'
+  | 'top-left'
+  | 'top-right'
+  | 'left-top'
+  | 'left-bottom'
+  | 'right-top'
+  | 'right-bottom'
+
 export interface Settings {
   page: PageSize
   customW: number
@@ -32,6 +43,7 @@ export interface Settings {
   marks: boolean
   labels: boolean
   scaleBar: boolean
+  scaleBarPos: ScaleBarPos
   dotSize: number
 }
 
@@ -51,6 +63,7 @@ export const DEFAULT_SETTINGS: Settings = {
   marks: true,
   labels: true,
   scaleBar: true,
+  scaleBarPos: 'bottom-left',
   dotSize: 0.4,
 }
 
@@ -66,7 +79,7 @@ export const MARK_OFF = 3
 export const MARK_LEN = 4
 const MARK_REACH = MARK_OFF + MARK_LEN / 2
 const LABEL_REACH = MARK_OFF + 3
-const SCALE_BAR = 6
+export const SCALE_BAR = 6
 
 /** Affine map [a, b, c, d, e, f]: x' = a x + c y + e, y' = b x + d y + f. */
 export type Mat = [number, number, number, number, number, number]
@@ -133,9 +146,12 @@ export function layout(films: Film[], layers: Layer[], s: Settings): Layout {
   const [tw, th] = s.rotate ? [bh, bw] : [bw, bh]
   // keep crosses, labels and the check bar on the page and off each other
   const edgeX = s.marks ? MARK_REACH : 0
-  const top = s.marks ? MARK_REACH : 0
-  const bottom = Math.max(s.marks ? MARK_REACH : 0, s.labels ? LABEL_REACH : 0) + (s.scaleBar ? SCALE_BAR : 0)
-  const availW = W - 2 * s.margin - 2 * edgeX
+  const bar = (edge: string) => (s.scaleBar && s.scaleBarPos.startsWith(edge) ? SCALE_BAR : 0)
+  const left = edgeX + bar('left')
+  const right = edgeX + bar('right')
+  const top = (s.marks ? MARK_REACH : 0) + bar('top')
+  const bottom = Math.max(s.marks ? MARK_REACH : 0, s.labels ? LABEL_REACH : 0) + bar('bottom')
+  const availW = W - 2 * s.margin - left - right
   const availH = H - 2 * s.margin - top - bottom
   const fitCols = Math.floor((availW + s.gapX) / (tw + s.gapX))
   const rows = Math.floor((availH + s.gapY) / (th + s.gapY))
@@ -168,7 +184,7 @@ export function layout(films: Film[], layers: Layer[], s: Settings): Layout {
     const usedRows = Math.ceil(chunk.length / cols)
     const totalW = cols * tw + (cols - 1) * s.gapX
     const totalH = usedRows * th + (usedRows - 1) * s.gapY
-    const ox = (W - totalW) / 2
+    const ox = s.margin + left + (availW - totalW) / 2
     const oy = s.margin + top + (availH - totalH) / 2
     const tiles: Tile[] = chunk.map((film, i) => {
       const x = ox + (i % cols) * (tw + s.gapX)

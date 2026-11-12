@@ -90,10 +90,16 @@ export class PdfPainter implements Painter {
       color,
     )
   }
-  text(x: number, y: number, size: number, str: string, anchor: 'start' | 'middle'): void {
+  text(x: number, y: number, size: number, str: string, anchor: 'start' | 'middle' | 'end', vertical = false): void {
     const safe = str.replace(/[^\x20-\x7e]/g, '?').replace(/([\\()])/g, '\\$1')
-    const sx = anchor === 'middle' ? x - textWidth(str, size) / 2 : x
-    this.ops.push(`0 g BT /F1 ${n(size * PT)} Tf ${this.xy(sx, y)} Td (${safe}) Tj ET`)
+    const w = textWidth(str, size)
+    const shift = anchor === 'middle' ? w / 2 : anchor === 'end' ? w : 0
+    if (vertical) {
+      // reads upwards: the text starts `shift` below the anchor; text matrix turned 90° (PDF y is up)
+      this.ops.push(`0 g BT /F1 ${n(size * PT)} Tf 0 1 -1 0 ${this.xy(x, y + shift)} Tm (${safe}) Tj ET`)
+    } else {
+      this.ops.push(`0 g BT /F1 ${n(size * PT)} Tf ${this.xy(x - shift, y)} Td (${safe}) Tj ET`)
+    }
   }
 
   async toBlob(): Promise<Blob> {
