@@ -24,6 +24,9 @@
 - **Drop in a Gerber zip** (or loose files) from KiCad, Eagle, Altium, EasyEDA and others.
   Layers are recognised from their file names. Clear polarity (`%LPC*%`, used by EasyEDA for
   copper-pour clearances) is handled.
+- **Several boards on one sheet**: drop more zips (one per board) and small boards share the
+  page. Copies of different sizes are packed biggest first with smaller ones beside them, each board's top and bottom kept together
+  as a fold pair with its own fold line, and labels carry the board name.
 - **Any number of films per sheet**: pick the layer, number of copies, mirror, negative,
   drill-centre dots and board outline for each one.
 - **Sheet layout**: A4, A3, Letter, Legal or custom page, landscape, margins, gaps,
@@ -41,7 +44,7 @@
 ## How to use
 
 1. Export Gerbers and the drill file from your PCB tool (include the board outline).
-2. Drop the zip into the app. You start with top and bottom copper as negative films,
+2. Drop the zip into the app (drop more zips to add more boards to the same sheet). You start with top and bottom copper as negative films,
    2 copies each, top mirrored. Solder mask and silkscreen films are ready but switched off.
 3. Adjust films and the sheet, check the preview, then **Download PDF**.
 4. Print on transparency at **Actual size / 100 %** with no scaling, and measure the 50 mm bar.

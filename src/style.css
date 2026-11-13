@@ -188,3 +188,12 @@ button.icon.more.open, button.icon.more:hover { background: var(--soft); color: 
 .mini { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.82em; color: var(--muted); }
 .mini select { font-size: 1.1em; color: var(--ink); width: 100%; }
 .group > .segmented { align-self: flex-start; }
+
+/* ---------- boards ---------- */
+.boards { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; gap: 0.25rem; }
+.boards:empty { display: none; }
+.boards li { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.2rem 0.3rem 0.6rem; border: 1px solid var(--line); border-radius: 7px; }
+.boards .bname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.boards .bmeta { margin-left: auto; color: var(--muted); font-size: 0.85em; white-space: nowrap; }
+.board-head { margin: 0.7rem 0 0.1rem; font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+.board-head:first-child { margin-top: 0; }

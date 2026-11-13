@@ -10,6 +10,9 @@ export type LayerSide = 'top' | 'bottom' | 'inner' | 'all' | 'none'
 
 export interface Layer {
   id: string
+  /** the board (one zip or one drop of loose files) this layer belongs to */
+  boardId: string
+  boardName: string
   filename: string
   type: LayerType
   side: LayerSide
@@ -64,7 +67,7 @@ function clearFlags(tree: GerberTree, total: number): boolean[] | undefined {
   return flags
 }
 
-export async function loadFiles(files: File[]): Promise<LoadResult> {
+export async function loadFiles(files: File[], boardId = 'B0', boardName = 'board'): Promise<LoadResult> {
   const sources = await expand(files)
   const ids = identifyLayers(sources.map((s) => s.name))
   const layers: Layer[] = []
@@ -77,7 +80,9 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
       const isDrill = tree.filetype === 'drill'
       const type: LayerType = isDrill ? 'drill' : ((idt.type ?? 'unknown') as LayerType)
       const layer: Layer = {
-        id: `L${i}`,
+        id: `${boardId}L${i}`,
+        boardId,
+        boardName,
         filename: src.name,
         type,
         side: (idt.side ?? (isDrill ? 'all' : 'none')) as LayerSide,

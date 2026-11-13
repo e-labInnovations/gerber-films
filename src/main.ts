@@ -1,6 +1,6 @@
 import './style.css'
 import { loadFiles, type Layer } from './load'
-import { DEFAULT_SETTINGS, layout, pageSize, type Film, type Layout, type PageSize, type ScaleBarPos, type Settings } from './layout'
+import { boardBounds, DEFAULT_SETTINGS, layout, pageSize, type Film, type Layout, type PageSize, type ScaleBarPos, type Settings } from './layout'
 import { drawLayout } from './render'
 import { SvgPainter } from './svg'
 import { PdfPainter } from './pdf'
@@ -26,19 +26,25 @@ function saveSettings(): void {
   }
 }
 
+interface Board {
+  id: string
+  name: string
+  source: string
+}
+
 const state = {
+  boards: [] as Board[],
   layers: [] as Layer[],
   skipped: [] as string[],
   films: [] as Film[],
   settings: loadSettings(),
   page: 0,
-  project: 'board',
   lay: null as Layout | null,
-  source: '',
   expanded: new Set<string>(),
 }
 
 let filmSeq = 0
+let boardSeq = 0
 const newId = () => `F${filmSeq++}`
 
 const SIDE_NAME: Record<string, string> = { top: 'Top', bottom: 'Bottom', inner: 'Inner', all: '', none: '' }
@@ -55,6 +61,16 @@ const TYPE_NAME: Record<string, string> = {
 
 function layerName(l: Layer): string {
   return `${SIDE_NAME[l.side] ?? ''} ${TYPE_NAME[l.type] ?? l.type}`.trim()
+}
+
+const multi = () => state.boards.length > 1
+const boardOf = (f: Film) => state.layers.find((l) => l.id === f.layerId)?.boardId
+
+/** File name for downloads: the board, or the first board and how many more. */
+function projectName(): string {
+  const [first, ...rest] = state.boards
+  if (!first) return 'board'
+  return rest.length ? `${first.name}+${rest.length}` : first.name
 }
 
 /** Sensible films for a fresh upload: copper pairs on, mask and silk ready but off. */
@@ -132,9 +148,10 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <h2>1. Files</h2>
         <label class="drop" id="drop">
           <input id="files" type="file" multiple />
-          <strong id="drop-title">Drop a Gerber zip or files here</strong>
-          <span id="drop-sub">or click to choose. KiCad, Eagle, Altium and EasyEDA names are recognised.</span>
+          <strong id="drop-title">Drop Gerber zips or files here</strong>
+          <span id="drop-sub">or click to choose. One zip per board; several small boards can share a sheet.</span>
         </label>
+        <ul id="boards" class="boards"></ul>
         <details id="layers-box" class="layers-box" hidden>
           <summary id="layers-sum">Detected layers</summary>
           <ul id="layers" class="layers"></ul>
@@ -174,25 +191,63 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 `
 
 // ---------------------------------------------------------------- files
+/** Each zip is one board; loose files dropped together are one board. */
+function groupFiles(files: File[]): Array<{ name: string; source: string; files: File[] }> {
+  // KiCad "board-F_Cu.gbr", EasyEDA "Gerber_board_PCB_board_2026-11-11.zip" -> "board"
+  const stem = (n: string) =>
+    n
+      .replace(/\.[^.]+$/, '')
+      .replace(/^gerber[-_ ]+/i, '')
+      .replace(/_PCB_.*$/, '')
+      .replace(/[-_ ]\d{4}-\d{2}-\d{2}.*$/, '')
+      .replace(/[-_](F|B)[-_.].*$/i, '') || 'board'
+  const groups = files.filter((f) => /\.zip$/i.test(f.name)).map((f) => ({ name: stem(f.name), source: f.name, files: [f] }))
+  const loose = files.filter((f) => !/\.zip$/i.test(f.name))
+  if (loose.length) groups.push({ name: stem(loose[0].name), source: loose.length === 1 ? loose[0].name : `${loose.length} files`, files: loose })
+  return groups
+}
+
+/** Add the dropped files to the sheet as one or more boards, keeping the boards already loaded. */
 async function handleFiles(list: FileList | File[]): Promise<void> {
   const files = [...list]
   if (!files.length) return
   $('#summary').textContent = 'Reading files…'
-  const zip = files.find((f) => /\.zip$/i.test(f.name))
-  state.source = zip?.name ?? (files.length === 1 ? files[0].name : `${files.length} files`)
-  state.project = (zip?.name ?? files[0].name).replace(/\.[^.]+$/, '').replace(/[-_](F|B)[-_.].*$/i, '') || 'board'
-  const res = await loadFiles(files)
-  state.layers = res.layers
-  state.skipped = res.skipped
-  state.films = presetFilms(res.layers)
-  state.expanded.clear()
+  state.skipped = []
+  for (const g of groupFiles(files)) {
+    const id = `B${boardSeq++}`
+    // keep names apart when the same board name is dropped twice
+    const taken = new Set(state.boards.map((b) => b.name))
+    let name = g.name
+    for (let k = 2; taken.has(name); k++) name = `${g.name} (${k})`
+    const res = await loadFiles(g.files, id, name)
+    state.skipped.push(...res.skipped)
+    if (!res.layers.length) continue
+    state.boards.push({ id, name, source: g.source })
+    state.layers.push(...res.layers)
+    state.films.push(...presetFilms(res.layers))
+  }
   state.page = 0
   renderLayers()
   renderFilms()
   update()
 }
 
-$('#files').addEventListener('change', (e) => handleFiles((e.target as HTMLInputElement).files ?? []))
+function removeBoard(id: string): void {
+  const gone = new Set(state.layers.filter((l) => l.boardId === id).map((l) => l.id))
+  state.boards = state.boards.filter((b) => b.id !== id)
+  state.layers = state.layers.filter((l) => !gone.has(l.id))
+  state.films = state.films.filter((f) => !gone.has(f.layerId))
+  state.skipped = []
+  renderLayers()
+  renderFilms()
+  update()
+}
+
+$('#files').addEventListener('change', async (e) => {
+  const input = e.target as HTMLInputElement
+  await handleFiles(input.files ?? [])
+  input.value = '' // so choosing the same zip again still adds it
+})
 const drop = $('#drop')
 drop.addEventListener('dragover', (e) => {
   e.preventDefault()
@@ -207,12 +262,26 @@ drop.addEventListener('drop', (e) => {
 
 function renderLayers(): void {
   const n = state.layers.length
-  const loaded = n > 0
+  const loaded = state.boards.length > 0
   $('#drop').classList.toggle('compact', loaded)
-  $('#drop-title').textContent = loaded ? state.source : 'Drop a Gerber zip or files here'
+  $('#drop-title').textContent = loaded ? 'Add another board' : 'Drop Gerber zips or files here'
   $('#drop-sub').textContent = loaded
-    ? `${n} layer${n === 1 ? '' : 's'} · drop or click to replace`
-    : 'or click to choose. KiCad, Eagle, Altium and EasyEDA names are recognised.'
+    ? 'Drop or click: each zip is one more board on the sheet'
+    : 'or click to choose. One zip per board; several small boards can share a sheet.'
+  $('#boards').replaceChildren(
+    ...state.boards.map((b) => {
+      const own = state.layers.filter((l) => l.boardId === b.id)
+      const bb = boardBounds(own)
+      const size = bb ? `${(bb.x1 - bb.x0).toFixed(1)} × ${(bb.y1 - bb.y0).toFixed(1)} mm` : 'no outline'
+      return h(
+        'li',
+        {},
+        h('span', { class: 'bname', title: b.source }, b.name),
+        h('span', { class: 'bmeta' }, `${size} · ${own.length} layers`),
+        h('button', { class: 'icon', title: `Remove ${b.name}`, 'aria-label': `Remove ${b.name}`, onclick: () => removeBoard(b.id) }, '×'),
+      )
+    }),
+  )
   const box = $('#layers-box') as HTMLDetailsElement
   box.hidden = !loaded && !state.skipped.length
   const issues = state.layers.some((l) => l.warning) || state.skipped.length > 0
@@ -224,7 +293,7 @@ function renderLayers(): void {
         'li',
         {},
         h('span', { class: `tag t-${l.type}` }, layerName(l) || l.type),
-        h('span', { class: 'fname', title: l.filename }, l.filename),
+        h('span', { class: 'fname', title: l.filename }, multi() ? `${l.boardName} · ${l.filename}` : l.filename),
         l.warning ? h('span', { class: 'warn' }, l.warning) : null,
       ),
     ),
@@ -262,123 +331,130 @@ function renderFilms(): void {
     if (structural) renderFilms()
     update()
   }
-  $('#films').replaceChildren(
-    ...state.films.map((f, i) => {
-      const open = state.expanded.has(f.id)
-      const layer = state.layers.find((l) => l.id === f.layerId)
-      const setCopies = (n: number) => {
-        f.copies = Math.max(0, Math.min(50, n))
-        changed(true)
-      }
-      const head = h(
-        'div',
-        { class: 'film-head' },
-        h(
-          'label',
-          { class: 'switch', title: f.enabled ? 'Printing: click to skip' : 'Skipped: click to print' },
-          h('input', {
-            type: 'checkbox',
-            checked: f.enabled,
-            'aria-label': `Print ${f.name}`,
-            onchange: (e: Event) => {
-              f.enabled = (e.target as HTMLInputElement).checked
-              changed(true)
-            },
-          }),
-          h('span', { class: 'knob' }),
-        ),
+  const row = (f: Film) => {
+    const open = state.expanded.has(f.id)
+    const layer = state.layers.find((l) => l.id === f.layerId)
+    const setCopies = (n: number) => {
+      f.copies = Math.max(0, Math.min(50, n))
+      changed(true)
+    }
+    const head = h(
+      'div',
+      { class: 'film-head' },
+      h(
+        'label',
+        { class: 'switch', title: f.enabled ? 'Printing: click to skip' : 'Skipped: click to print' },
         h('input', {
-          class: 'name',
-          value: f.name,
-          'aria-label': 'Film name',
-          title: layer ? `${layerName(layer)} · ${layer.filename}` : '',
-          oninput: (e: Event) => {
-            f.name = (e.target as HTMLInputElement).value
-            update()
+          type: 'checkbox',
+          checked: f.enabled,
+          'aria-label': `Print ${f.name}`,
+          onchange: (e: Event) => {
+            f.enabled = (e.target as HTMLInputElement).checked
+            changed(true)
           },
         }),
-        f.enabled
-          ? h(
-              'div',
-              { class: 'stepper', title: 'Copies' },
-              h('button', { 'aria-label': 'Fewer copies', disabled: f.copies <= 1, onclick: () => setCopies(f.copies - 1) }, '−'),
-              h('span', { 'aria-live': 'polite' }, `${f.copies}`),
-              h('button', { 'aria-label': 'More copies', disabled: f.copies >= 50, onclick: () => setCopies(f.copies + 1) }, '+'),
-            )
-          : null,
-        h(
-          'button',
-          {
-            class: `icon more ${open ? 'open' : ''}`,
-            title: 'Layer and more',
-            'aria-label': 'Layer and more',
-            'aria-expanded': String(open),
-            onclick: () => {
-              if (open) state.expanded.delete(f.id)
-              else state.expanded.add(f.id)
-              renderFilms()
-            },
-          },
-          '⋯',
-        ),
-      )
-      const chips = f.enabled
+        h('span', { class: 'knob' }),
+      ),
+      h('input', {
+        class: 'name',
+        value: f.name,
+        'aria-label': 'Film name',
+        title: layer ? `${layerName(layer)} · ${layer.filename}` : '',
+        oninput: (e: Event) => {
+          f.name = (e.target as HTMLInputElement).value
+          update()
+        },
+      }),
+      f.enabled
         ? h(
             'div',
-            { class: 'chips' },
-            chip('Mirror', f.mirror, 'Mirror: on for top-side films so the toner faces the copper', (v) => {
-              f.mirror = v
-              changed()
-            }),
-            chip('Negative', f.negative, 'Negative: copper clear, rest black (dry-film resist)', (v) => {
-              f.negative = v
-              changed()
-            }),
-            chip('Drill dots', f.drillDots, 'Small centre dots in every hole, to guide the drill', (v) => {
-              f.drillDots = v
-              changed()
-            }),
-            chip('Outline', f.outline, 'Draw the board outline', (v) => {
-              f.outline = v
-              changed()
-            }),
+            { class: 'stepper', title: 'Copies' },
+            h('button', { 'aria-label': 'Fewer copies', disabled: f.copies <= 1, onclick: () => setCopies(f.copies - 1) }, '−'),
+            h('span', { 'aria-live': 'polite' }, `${f.copies}`),
+            h('button', { 'aria-label': 'More copies', disabled: f.copies >= 50, onclick: () => setCopies(f.copies + 1) }, '+'),
           )
-        : null
-      const more = open
-        ? h(
-            'div',
-            { class: 'film-more' },
+        : null,
+      h(
+        'button',
+        {
+          class: `icon more ${open ? 'open' : ''}`,
+          title: 'Layer and more',
+          'aria-label': 'Layer and more',
+          'aria-expanded': String(open),
+          onclick: () => {
+            if (open) state.expanded.delete(f.id)
+            else state.expanded.add(f.id)
+            renderFilms()
+          },
+        },
+        '⋯',
+      ),
+    )
+    const chips = f.enabled
+      ? h(
+          'div',
+          { class: 'chips' },
+          chip('Mirror', f.mirror, 'Mirror: on for top-side films so the toner faces the copper', (v) => {
+            f.mirror = v
+            changed()
+          }),
+          chip('Negative', f.negative, 'Negative: copper clear, rest black (dry-film resist)', (v) => {
+            f.negative = v
+            changed()
+          }),
+          chip('Drill dots', f.drillDots, 'Small centre dots in every hole, to guide the drill', (v) => {
+            f.drillDots = v
+            changed()
+          }),
+          chip('Outline', f.outline, 'Draw the board outline', (v) => {
+            f.outline = v
+            changed()
+          }),
+        )
+      : null
+    const more = open
+      ? h(
+          'div',
+          { class: 'film-more' },
+          h(
+            'label',
+            { class: 'mini' },
+            'Layer',
             h(
-              'label',
-              { class: 'mini' },
-              'Layer',
-              h(
-                'select',
-                {
-                  onchange: (e: Event) => {
-                    f.layerId = (e.target as HTMLSelectElement).value
-                    changed(true)
-                  },
-                },
-                ...plotLayers.map((l) => h('option', { value: l.id, selected: l.id === f.layerId }, `${layerName(l)} — ${l.filename}`)),
-              ),
-            ),
-            h(
-              'button',
+              'select',
               {
-                class: 'link danger',
-                onclick: () => {
-                  state.films.splice(i, 1)
-                  state.expanded.delete(f.id)
+                onchange: (e: Event) => {
+                  f.layerId = (e.target as HTMLSelectElement).value
                   changed(true)
                 },
               },
-              'Remove film',
+              ...plotLayers.map((l) => h('option', { value: l.id, selected: l.id === f.layerId }, `${multi() ? `${l.boardName}: ` : ''}${layerName(l)} — ${l.filename}`)),
             ),
-          )
-        : null
-      return h('div', { class: `film ${f.enabled ? '' : 'off'}` }, head, chips, more)
-    }),
+          ),
+          h(
+            'button',
+            {
+              class: 'link danger',
+              onclick: () => {
+                state.films.splice(state.films.indexOf(f), 1)
+                state.expanded.delete(f.id)
+                changed(true)
+              },
+            },
+            'Remove film',
+          ),
+        )
+      : null
+    return h('div', { class: `film ${f.enabled ? '' : 'off'}` }, head, chips, more)
+  }
+  // with several boards, films sit under a heading per board
+  $('#films').replaceChildren(
+    ...(multi()
+      ? state.boards.flatMap((b) => {
+          const own = state.films.filter((f) => boardOf(f) === b.id)
+          return own.length ? [h('div', { class: 'board-head' }, b.name), ...own.map(row)] : []
+        })
+      : state.films.map(row)),
   )
 }
 
@@ -545,7 +621,9 @@ function update(): void {
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
   $('#summary').textContent = !state.layers.length
     ? 'No files loaded.'
-    : b
+    : lay.boards > 1
+      ? `${lay.boards} boards · ${plural(filmsOn, 'film')} · packed on ${W.toFixed(0)} × ${H.toFixed(0)} mm pages · ${plural(lay.pages.length, 'page')}`
+      : b
       ? `Board ${(b.x1 - b.x0).toFixed(1)} × ${(b.y1 - b.y0).toFixed(1)} mm · ${plural(filmsOn, 'film')} · ${lay.cols} × ${lay.rows} per ${W.toFixed(0)} × ${H.toFixed(0)} mm page · ${plural(lay.pages.length, 'page')}`
       : 'No board outline or copper found.'
   $('#warnings').replaceChildren(...lay.warnings.map((w) => h('li', {}, w)))
@@ -588,14 +666,14 @@ async function buildPdf(): Promise<Blob | null> {
 
 $('#pdf').addEventListener('click', async () => {
   const blob = await buildPdf()
-  if (blob) download(blob, `${state.project}-films.pdf`)
+  if (blob) download(blob, `${projectName()}-films.pdf`)
 })
 
 $('#svg').addEventListener('click', () => {
   if (!state.lay) return
   const p = new SvgPainter()
   drawLayout(p, state.lay, state.layers, state.settings, state.page)
-  download(new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n${p.pages[0]}`], { type: 'image/svg+xml' }), `${state.project}-films-p${state.page + 1}.svg`)
+  download(new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n${p.pages[0]}`], { type: 'image/svg+xml' }), `${projectName()}-films-p${state.page + 1}.svg`)
 })
 
 $('#prev').addEventListener('click', () => {

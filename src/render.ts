@@ -40,13 +40,15 @@ export function filmLabel(name: string, mirror: boolean, negative: boolean): str
   return `${name}${mirror ? '  (mirrored)' : ''}  |  ${negative ? 'NEGATIVE' : 'POSITIVE'}`
 }
 
-function drawPage(p: Painter, page: Page, layers: Map<string, Layer>, s: Settings): void {
+function drawPage(p: Painter, page: Page, layers: Map<string, Layer>, s: Settings, named: boolean): void {
   p.beginPage(page.w, page.h)
-  const outline = [...layers.values()].find((l) => l.type === 'outline')
-  const drill = [...layers.values()].find((l) => l.type === 'drill')
   for (const t of page.tiles) {
     const layer = layers.get(t.film.layerId)
     if (!layer) continue
+    // outline and drill holes come from the tile's own board
+    const own = [...layers.values()].filter((l) => l.boardId === layer.boardId)
+    const outline = own.find((l) => l.type === 'outline')
+    const drill = own.find((l) => l.type === 'drill')
     const fg: Color = t.film.negative ? 'white' : 'black'
     const bg: Color = t.film.negative ? 'black' : 'white'
     p.clip(t.x, t.y, t.w, t.h)
@@ -82,14 +84,11 @@ function drawPage(p: Painter, page: Page, layers: Map<string, Layer>, s: Setting
       p.stroke(subs, 0.2, 'black')
     }
     if (s.labels) {
-      p.text(t.x + t.w / 2, t.y + t.h + MARK_OFF + 1, 2.2, filmLabel(t.film.name, t.film.mirror, t.film.negative), 'middle')
+      const name = named ? `${layer.boardName}: ${t.film.name}` : t.film.name
+      p.text(t.x + t.w / 2, t.y + t.h + MARK_OFF + 1, 2.2, filmLabel(name, t.film.mirror, t.film.negative), 'middle')
     }
   }
-  if (page.folds.length && page.tiles.length) {
-    const top = Math.min(...page.tiles.map((t) => t.y)) - page.markY
-    const bottom = Math.max(...page.tiles.map((t) => t.y + t.h)) + page.markY
-    for (const x of page.folds) p.stroke([line(x, top, x, bottom)], 0.15, 'black', [2, 2])
-  }
+  for (const f of page.folds) p.stroke([line(f.x, f.y0, f.x, f.y1)], 0.15, 'black', [2, 2])
   if (s.scaleBar) drawScaleBar(p, page, s)
   p.endPage()
 }
@@ -122,6 +121,6 @@ function drawScaleBar(p: Painter, page: Page, s: Settings): void {
 export function drawLayout(p: Painter, lay: Layout, layers: Layer[], s: Settings, only?: number): void {
   const byId = new Map(layers.map((l) => [l.id, l]))
   lay.pages.forEach((page, i) => {
-    if (only === undefined || only === i) drawPage(p, page, byId, s)
+    if (only === undefined || only === i) drawPage(p, page, byId, s, lay.boards > 1)
   })
 }
